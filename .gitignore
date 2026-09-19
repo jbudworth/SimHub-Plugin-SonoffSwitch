@@ -1,0 +1,11 @@
+## .NET / Visual Studio
+bin/
+obj/
+.vs/
+*.user
+*.suo
+
+## Build output that shouldn't be tracked
+*.pdb
+*.dll
+!lib/README.txt
