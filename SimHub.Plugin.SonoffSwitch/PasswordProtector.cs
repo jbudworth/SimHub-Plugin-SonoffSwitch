@@ -59,14 +59,39 @@ namespace SimHub.Plugin.SonoffSwitch
 
         /// <summary>
         /// Ensures a stored value is encrypted, migrating plaintext left over from a
-        /// pre-encryption version of this plugin the first time it's touched.
+        /// pre-encryption version of this plugin the first time it's touched. A value that
+        /// is recognizably DPAPI ciphertext but won't decrypt here (settings file copied
+        /// from another machine/user) is unrecoverable, so it's cleared - re-encrypting it
+        /// as if it were plaintext would just produce garbage that looks like a validly
+        /// set password in the UI.
         /// </summary>
         public static string EnsureEncrypted(string storedValue)
         {
             if (string.IsNullOrEmpty(storedValue))
                 return storedValue;
 
-            return TryDecrypt(storedValue, out _) ? storedValue : Encrypt(storedValue);
+            if (TryDecrypt(storedValue, out _))
+                return storedValue;
+
+            return LooksLikeDpapiBlob(storedValue) ? string.Empty : Encrypt(storedValue);
+        }
+
+        private static bool LooksLikeDpapiBlob(string value)
+        {
+            try
+            {
+                var bytes = Convert.FromBase64String(value);
+                // DPAPI blobs start with version 1 followed by the DPAPI provider GUID.
+                if (bytes.Length < 20 || BitConverter.ToInt32(bytes, 0) != 1)
+                    return false;
+                var guidBytes = new byte[16];
+                Array.Copy(bytes, 4, guidBytes, 0, 16);
+                return new Guid(guidBytes) == new Guid("df9d8cd0-1501-11d1-8c7a-00c04fc297eb");
+            }
+            catch
+            {
+                return false;
+            }
         }
     }
 }

@@ -53,10 +53,14 @@ namespace SimHub.Plugin.SonoffSwitch
             var url = $"{BuildBaseUrl(device)}/cm?cmnd={Uri.EscapeDataString(command)}";
             var request = new HttpRequestMessage(HttpMethod.Get, url);
 
-            if (device.UseAuth && !string.IsNullOrEmpty(device.Username))
+            if (device.UseAuth)
             {
+                // Tasmota's web login is always "admin"; its UI only asks for a password,
+                // so a blank username here should still authenticate rather than silently
+                // sending no credentials.
+                var username = string.IsNullOrWhiteSpace(device.Username) ? "admin" : device.Username.Trim();
                 var plainPassword = PasswordProtector.Decrypt(device.Password);
-                var raw = $"{device.Username}:{plainPassword}";
+                var raw = $"{username}:{plainPassword}";
                 var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(raw));
                 request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", encoded);
             }

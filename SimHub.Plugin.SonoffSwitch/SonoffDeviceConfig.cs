@@ -31,6 +31,15 @@ namespace SimHub.Plugin.SonoffSwitch
         /// <summary>Unique id, used internally to keep runtime state keyed independently of the display name.</summary>
         public string Id { get; set; } = Guid.NewGuid().ToString("N");
 
+        /// <summary>
+        /// Shallow copy, so the settings UI can edit a device without mutating the live
+        /// instance the plugin is polling with until the user actually saves.
+        /// </summary>
+        public SonoffDeviceConfig Clone()
+        {
+            return (SonoffDeviceConfig)MemberwiseClone();
+        }
+
         public override string ToString()
         {
             return $"{Name} ({IpAddress})";

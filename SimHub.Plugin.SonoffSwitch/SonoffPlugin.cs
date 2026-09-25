@@ -21,7 +21,7 @@ namespace SimHub.Plugin.SonoffSwitch
 
         public SonoffPluginSettings Settings { get; private set; }
 
-        private readonly TasmotaClient _client = new TasmotaClient(3000);
+        private TasmotaClient _client;
         private readonly Dictionary<string, DeviceRuntimeState> _states = new Dictionary<string, DeviceRuntimeState>();
         private readonly object _stateLock = new object();
         private Timer _pollTimer;
@@ -82,6 +82,7 @@ namespace SimHub.Plugin.SonoffSwitch
             PluginManager = pluginManager;
 
             Settings = this.ReadCommonSettings<SonoffPluginSettings>(SettingsKey, () => new SonoffPluginSettings());
+            _client = new TasmotaClient(Settings.RequestTimeoutMs);
 
             var migratedAny = false;
             foreach (var device in Settings.Devices)
@@ -158,7 +159,7 @@ namespace SimHub.Plugin.SonoffSwitch
             }
         }
 
-        private static string SanitizeName(string name)
+        internal static string SanitizeName(string name)
         {
             if (string.IsNullOrWhiteSpace(name))
                 return "Device";
@@ -210,6 +211,19 @@ namespace SimHub.Plugin.SonoffSwitch
             StartPolling();
         }
 
+        /// <summary>
+        /// Rebuilds the HTTP client after Settings.RequestTimeoutMs changes (e.g. an import).
+        /// HttpClient.Timeout can't be changed once the client has sent a request, so a new
+        /// client is swapped in; any poll in flight on the old client fails once and is
+        /// caught by the normal per-device error handling.
+        /// </summary>
+        public void ApplyRequestTimeout()
+        {
+            var old = _client;
+            _client = new TasmotaClient(Settings.RequestTimeoutMs);
+            old?.Dispose();
+        }
+
         /// <summary>Persists Settings to disk immediately, so device edits survive a crash/kill of SimHub.</summary>
         public void SaveSettingsNow()
         {
@@ -259,9 +273,18 @@ namespace SimHub.Plugin.SonoffSwitch
                 lock (_stateLock)
                 {
                     state.Online = false;
-                    state.LastError = ex.Message;
+                    state.LastError = DescribeError(ex);
                 }
             }
+        }
+
+        /// <summary>
+        /// HttpClient surfaces its timeout as a TaskCanceledException whose message
+        /// ("A task was canceled.") is meaningless in the status column, so translate it.
+        /// </summary>
+        private static string DescribeError(Exception ex)
+        {
+            return ex is OperationCanceledException ? "Request timed out" : ex.Message;
         }
 
         private async void SendPowerCommand(SonoffDeviceConfig device, bool? on)
@@ -288,7 +311,7 @@ namespace SimHub.Plugin.SonoffSwitch
                     lock (_stateLock)
                     {
                         state.Online = false;
-                        state.LastError = ex.Message;
+                        state.LastError = DescribeError(ex);
                     }
                 }
             }

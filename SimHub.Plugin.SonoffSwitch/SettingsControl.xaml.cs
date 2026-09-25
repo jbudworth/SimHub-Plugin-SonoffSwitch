@@ -20,8 +20,10 @@ namespace SimHub.Plugin.SonoffSwitch
             _plugin = plugin;
             DataContext = this;
 
+            // Rows edit clones, so grid edits don't leak into the live (polling) settings
+            // until TrySaveSettings copies them back.
             foreach (var device in _plugin.Settings.Devices)
-                Devices.Add(new DeviceRow(device));
+                Devices.Add(new DeviceRow(device.Clone()));
 
             PollIntervalBox.Text = _plugin.Settings.PollIntervalMs.ToString();
 
@@ -31,6 +33,10 @@ namespace SimHub.Plugin.SonoffSwitch
             _statusRefreshTimer.Tick += (s, e) => RefreshStatusText();
             _statusRefreshTimer.Start();
 
+            // SimHub can cache and re-show the same control instance, so the timer must
+            // restart on Loaded - stopping only on Unloaded would freeze the status column
+            // the second time the page is opened.
+            Loaded += (s, e) => { RefreshStatusText(); _statusRefreshTimer.Start(); };
             Unloaded += (s, e) => _statusRefreshTimer.Stop();
         }
 
@@ -157,11 +163,25 @@ namespace SimHub.Plugin.SonoffSwitch
                 return false;
             }
 
-            _plugin.Settings.Devices = Devices.Select(d => d.Config).ToList();
+            // Property/action names are built from the sanitized name, so "Rig 1" and "Rig1"
+            // would collide even though the raw names differ. Validate on the sanitized form.
+            var sanitized = names.Select(SonoffPlugin.SanitizeName).ToList();
+            if (sanitized.Distinct(StringComparer.OrdinalIgnoreCase).Count() != sanitized.Count)
+            {
+                MessageBox.Show(
+                    "Two or more device names become identical once spaces/punctuation are removed (only letters, digits and _ are used for SimHub property names). Make the names more distinct.",
+                    "Sonoff plugin", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return false;
+            }
+
+            // Store and register clones: the grid keeps editing its own copies, so future
+            // unsaved edits can't mutate what the poller and actions are using.
+            var configs = Devices.Select(d => d.Config.Clone()).ToList();
+            _plugin.Settings.Devices = configs;
             _plugin.Settings.PollIntervalMs = pollInterval;
 
-            foreach (var row in Devices)
-                _plugin.RegisterDevice(row.Config);
+            foreach (var config in configs)
+                _plugin.RegisterDevice(config);
 
             _plugin.RestartPolling();
             _plugin.SaveSettingsNow();
@@ -254,6 +274,11 @@ namespace SimHub.Plugin.SonoffSwitch
                 device.Password = PasswordProtector.EnsureEncrypted(device.Password);
             }
 
+            // Snapshot the current UI state so a rejected import (validation failure in
+            // TrySaveSettings) doesn't leave the grid showing rows that were never applied.
+            var previousRows = Devices.ToList();
+            var previousPollText = PollIntervalBox.Text;
+
             Devices.Clear();
             foreach (var device in imported.Devices)
                 Devices.Add(new DeviceRow(device));
@@ -261,7 +286,20 @@ namespace SimHub.Plugin.SonoffSwitch
             PollIntervalBox.Text = (imported.PollIntervalMs > 0 ? imported.PollIntervalMs : _plugin.Settings.PollIntervalMs).ToString();
 
             if (!TrySaveSettings())
+            {
+                Devices.Clear();
+                foreach (var row in previousRows)
+                    Devices.Add(row);
+                PollIntervalBox.Text = previousPollText;
                 return;
+            }
+
+            if (imported.RequestTimeoutMs > 0 && imported.RequestTimeoutMs != _plugin.Settings.RequestTimeoutMs)
+            {
+                _plugin.Settings.RequestTimeoutMs = imported.RequestTimeoutMs;
+                _plugin.ApplyRequestTimeout();
+                _plugin.SaveSettingsNow();
+            }
 
             RefreshStatusText();
 
