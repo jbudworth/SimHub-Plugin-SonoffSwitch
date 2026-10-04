@@ -4,6 +4,8 @@ Controls Sonoff TH10/TH16 wifi smart switches and exposes their temperature/humi
 sensor readings as SimHub properties, so they can drive dashboards, macros, or be
 combined with any other SimHub data.
 
+![Settings](imgs/SonoffSwitch_Setttings.png)
+
 ## Important: firmware requirement
 
 Stock Sonoff / eWeLink firmware only exposes a **cloud** API (OAuth2 login via the
